@@ -32,6 +32,12 @@ export default function LandingPage() {
           >
             🌈 Lighting Control
           </a>
+          <a
+            href="/fan-control"
+            className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-lg font-semibold shadow-lg transition"
+          >
+            🌀 Fan Control
+          </a>
         </div>
       </main>
 

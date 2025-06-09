@@ -1,16 +1,17 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <DHT.h>
 
 // === WiFi Configuration ===
-const char *ssid = "Bourgeois WIFI 4G";
-const char *password = "pEtYCHAN";
+const char *ssid = "ZTE_2.4G_J3Snvh";
+const char *password = "h5WrbQq7";
 
 // === API Configuration ===
-const char *apiBaseUrl = "http://192.168.1.3:3000/api"; // Replace with your computer's IP
-const unsigned long apiCheckInterval = 500;             // Check for commands every 500ms
-const unsigned long sensorSendInterval = 2000;          // Send sensor data every 2 seconds
-const unsigned long batchSensorInterval = 5000;         // Batch multiple sensor readings
+const char *apiBaseUrl = "http://192.168.1.13:3000/api"; // Replace with your computer's IP
+const unsigned long apiCheckInterval = 500;              // Check for commands every 500ms
+const unsigned long sensorSendInterval = 2000;           // Send sensor data every 2 seconds
+const unsigned long batchSensorInterval = 5000;          // Batch multiple sensor readings
 
 // === Device IDs (from your database) ===
 const char *rgbLedDeviceId = "af34d4b7-bab2-447d-a6c9-424280446b40";
@@ -18,6 +19,10 @@ const char *kitchenLedDeviceId = "35ce79e5-370a-42d2-bef2-8ba5ff621f43";
 const char *garageLedDeviceId = "1b2e98cb-27c3-4b40-b4db-f98366cdd857";
 const char *sharedLdrDeviceId = "4e3548f3-b877-458c-918b-12ebb223bbaf";
 const char *garageLdrDeviceId = "ae5d31cf-088a-408a-9aef-4e1c96313eb9";
+
+// === Fan Control Device IDs (Add your actual IDs from Supabase) ===
+const char *temperatureSensorDeviceId = "69ae1a2e-d49f-4b57-b4fc-9674977bcb0c";
+const char *fanMotorDeviceId = "006e2dd6-fdb9-420c-81d6-39e896d69bd1";
 
 // === Timing Variables ===
 unsigned long lastApiCheck = 0;
@@ -44,12 +49,33 @@ int garageLdrThreshold = 2000;
 const int kitchenLedPin = 14; // Kitchen LED (shares LDR)
 const int garageLedPin = 12;  // Garage LED (own LDR)
 
+// === Fan Control Hardware ===
+#define DHTPIN 15 // DHT11 data pin
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+const int motorPin = 5; // GPIO5 connected to IRLZ44N Gate
+
 // === Manual Control Flags ===
 bool kitchenManualOverride = false;
 bool kitchenLEDState = false;
 
 bool garageManualOverride = false;
 bool garageLEDState = false;
+
+// === Fan Control Variables ===
+bool fanAutoControl = true; // Default to automatic mode
+
+// PWM levels for fan speeds
+const uint8_t pwmOff = 0;
+const uint8_t pwmLow = 150;  // ~33% duty cycle
+const uint8_t pwmMed = 210;  // ~66% duty cycle
+const uint8_t pwmHigh = 255; // 100%
+
+uint8_t manualPWM = pwmOff; // Current PWM level
+float lastTemperature = 0.0;
+unsigned long lastTempSend = 0;
+const unsigned long tempSendInterval = 5000; // Send temperature every 5 seconds
 
 // === Modes ===
 enum Mode
@@ -97,6 +123,10 @@ void setup()
   // Kitchen and Garage LED setup
   pinMode(kitchenLedPin, OUTPUT);
   pinMode(garageLedPin, OUTPUT);
+
+  // Fan control setup
+  dht.begin();
+  pinMode(motorPin, OUTPUT);
 
   Serial.println("🌒 ESP32 Smart LED Controller with API Integration");
 
@@ -166,6 +196,37 @@ void loop()
     fadePalette();
   }
 
+  // === Fan Control Logic ===
+  float temp = dht.readTemperature();
+  if (!isnan(temp))
+  {
+    lastTemperature = temp;
+
+    // Auto mode control
+    if (fanAutoControl)
+    {
+      if (temp < 30.0)
+      {
+        manualPWM = pwmOff;
+      }
+      else if (temp >= 30.0 && temp <= 31.0)
+      {
+        manualPWM = pwmLow;
+      }
+      else if (temp > 31.0 && temp <= 32.0)
+      {
+        manualPWM = pwmMed;
+      }
+      else if (temp > 32.0)
+      {
+        manualPWM = pwmHigh;
+      }
+    }
+  }
+
+  // Apply fan speed
+  analogWrite(motorPin, manualPWM);
+
   // === API Communication ===
   unsigned long currentTime = millis();
 
@@ -204,11 +265,20 @@ void loop()
     lastBatchSensor = currentTime;
   }
 
+  // Send temperature data
+  if (currentTime - lastTempSend >= tempSendInterval && !isnan(lastTemperature))
+  {
+    sendTemperatureData(lastTemperature);
+    lastTempSend = currentTime;
+  }
+
   // === Debug Output Every 5000ms ===
   if (currentTime - lastDebugTime >= debugInterval)
   {
-    Serial.printf("LDR (Living+Kitchen): %d | Garage LDR: %d | WiFi: %s\n",
-                  ldrValue, garageLdrValue, WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
+    Serial.printf("LDR: %d | Garage: %d | Temp: %.1f°C | Fan: %d (%s) | WiFi: %s\n",
+                  ldrValue, garageLdrValue, lastTemperature, manualPWM,
+                  fanAutoControl ? "AUTO" : "MANUAL",
+                  WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
     lastDebugTime = currentTime;
   }
 }
@@ -302,6 +372,10 @@ const char *getDeviceType(const char *deviceId)
     return "kitchen_led";
   if (strcmp(deviceId, garageLedDeviceId) == 0)
     return "garage_led";
+  if (strcmp(deviceId, fanMotorDeviceId) == 0)
+    return "fan_motor";
+  if (strcmp(deviceId, temperatureSensorDeviceId) == 0)
+    return "temperature_sensor";
   return nullptr;
 }
 
@@ -319,6 +393,10 @@ bool executeCommand(const char *deviceType, String commandType, JsonObject comma
   else if (strcmp(deviceType, "garage_led") == 0)
   {
     return executeGarageCommand(commandType, commandData);
+  }
+  else if (strcmp(deviceType, "fan_motor") == 0)
+  {
+    return executeFanCommand(commandType, commandData);
   }
   return false;
 }
@@ -709,6 +787,35 @@ void handleSerial()
     Serial.println("Reconnecting to WiFi...");
     connectToWiFi();
   }
+  else if (input == "0")
+  {
+    manualPWM = pwmOff;
+    fanAutoControl = false;
+    Serial.println("Manual mode: Fan OFF");
+  }
+  else if (input == "1")
+  {
+    manualPWM = pwmLow;
+    fanAutoControl = false;
+    Serial.println("Manual mode: Fan LOW");
+  }
+  else if (input == "2")
+  {
+    manualPWM = pwmMed;
+    fanAutoControl = false;
+    Serial.println("Manual mode: Fan MEDIUM");
+  }
+  else if (input == "3")
+  {
+    manualPWM = pwmHigh;
+    fanAutoControl = false;
+    Serial.println("Manual mode: Fan HIGH");
+  }
+  else if (input.equalsIgnoreCase("A"))
+  {
+    fanAutoControl = true;
+    Serial.println("Switched to AUTO mode");
+  }
   else
   {
     int c1 = input.indexOf(',');
@@ -735,6 +842,7 @@ void handleSerial()
     {
       Serial.println("Invalid input. Try: 255,150,0 or #FF9900 or 'sunset'");
       Serial.println("New commands: 'wifi' (status), 'reconnect' (WiFi)");
+      Serial.println("Fan commands: 0-3 (speed), A (auto mode)");
     }
   }
 }
@@ -782,4 +890,118 @@ void fadePalette()
     }
     lastFadeTime = millis();
   }
+}
+
+// Fan control command execution
+bool executeFanCommand(String commandType, JsonObject commandData)
+{
+  if (commandType == "fan_control")
+  {
+    String action = commandData["action"];
+
+    if (action == "set_speed")
+    {
+      int speed = commandData["speed"];
+      fanAutoControl = false;
+
+      switch (speed)
+      {
+      case 0:
+        manualPWM = pwmOff;
+        Serial.println("Fan set to OFF via API");
+        break;
+      case 1:
+        manualPWM = pwmLow;
+        Serial.println("Fan set to LOW via API");
+        break;
+      case 2:
+        manualPWM = pwmMed;
+        Serial.println("Fan set to MEDIUM via API");
+        break;
+      case 3:
+        manualPWM = pwmHigh;
+        Serial.println("Fan set to HIGH via API");
+        break;
+      default:
+        return false;
+      }
+      return true;
+    }
+    else if (action == "set_auto")
+    {
+      fanAutoControl = true;
+      Serial.println("Fan set to AUTO mode via API");
+      return true;
+    }
+    else if (action == "set_manual")
+    {
+      fanAutoControl = false;
+      int speed = commandData["speed"];
+      switch (speed)
+      {
+      case 0:
+        manualPWM = pwmOff;
+        break;
+      case 1:
+        manualPWM = pwmLow;
+        break;
+      case 2:
+        manualPWM = pwmMed;
+        break;
+      case 3:
+        manualPWM = pwmHigh;
+        break;
+      default:
+        return false;
+      }
+      Serial.printf("Fan set to manual mode, speed %d via API\n", speed);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Send temperature data to API
+void sendTemperatureData(float temperature)
+{
+  if (WiFi.status() != WL_CONNECTED)
+    return;
+
+  sendSensorReading(temperatureSensorDeviceId, "temperature", (int)(temperature * 100), "celsius_x100");
+
+  // Also send fan status
+  sendFanStatus();
+}
+
+// Send fan status to API
+void sendFanStatus()
+{
+  if (WiFi.status() != WL_CONNECTED)
+    return;
+
+  HTTPClient http;
+  String url = String(apiBaseUrl) + "/fan-control";
+
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(1000);
+
+  DynamicJsonDocument doc(256);
+  doc["device_id"] = fanMotorDeviceId;
+  doc["current_speed"] = manualPWM;
+  doc["current_temperature"] = lastTemperature;
+  doc["auto_mode"] = fanAutoControl;
+
+  String jsonString;
+  serializeJson(doc, jsonString);
+
+  int httpResponseCode = http.PATCH(jsonString);
+
+  if (httpResponseCode == 200)
+  {
+    Serial.printf("Fan status sent: Speed=%d, Temp=%.1f°C, Auto=%s\n",
+                  manualPWM, lastTemperature, fanAutoControl ? "true" : "false");
+  }
+
+  http.end();
 }

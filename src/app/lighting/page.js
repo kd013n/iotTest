@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 
 export default function LightingControl() {
   const [devices, setDevices] = useState([]);
@@ -225,16 +226,22 @@ export default function LightingControl() {
             <p className="text-gray-300">ESP32 RGB LED & Sensor Management</p>
           </div>
           <nav className="flex gap-4">
-            <a href="#"
+            <Link href="/"
               className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition"
             >
               🏠 Home
-            </a>
+            </Link>
             <a
               href="/dashboard"
               className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition"
             >
               📊 Dashboard
+            </a>
+            <a
+              href="/fan-control"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+            >
+              🌀 Fan Control
             </a>
           </nav>
         </div>
