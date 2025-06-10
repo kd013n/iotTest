@@ -2,6 +2,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
+#include <ESP32Servo.h>
 
 // === WiFi Configuration ===
 const char *ssid = "ZTE_2.4G_J3Snvh";
@@ -23,6 +24,11 @@ const char *garageLdrDeviceId = "ae5d31cf-088a-408a-9aef-4e1c96313eb9";
 // === Fan Control Device IDs (Add your actual IDs from Supabase) ===
 const char *temperatureSensorDeviceId = "69ae1a2e-d49f-4b57-b4fc-9674977bcb0c";
 const char *fanMotorDeviceId = "006e2dd6-fdb9-420c-81d6-39e896d69bd1";
+
+// === Rain Detection Device IDs (Add your actual IDs from Supabase) ===
+const char *rainSensorDeviceId = "ca422f10-fbb6-46e3-a30c-9b25ae10bdbc";
+const char *windowServo1DeviceId = "bfdf323f-23e0-4c3a-8696-5e44720cfdc8";
+const char *windowServo2DeviceId = "163f8037-ac95-4a7b-9229-3dde8a8b78e5";
 
 // === Timing Variables ===
 unsigned long lastApiCheck = 0;
@@ -56,6 +62,13 @@ DHT dht(DHTPIN, DHTTYPE);
 
 const int motorPin = 5; // GPIO5 connected to IRLZ44N Gate
 
+// === Rain Detection Hardware ===
+const int rainSensorPin = 4;
+const int windowServoPin1 = 13;
+const int windowServoPin2 = 16; // Changed from 14 to avoid conflict
+
+Servo windowServo1, windowServo2;
+
 // === Manual Control Flags ===
 bool kitchenManualOverride = false;
 bool kitchenLEDState = false;
@@ -76,6 +89,42 @@ uint8_t manualPWM = pwmOff; // Current PWM level
 float lastTemperature = 0.0;
 unsigned long lastTempSend = 0;
 const unsigned long tempSendInterval = 5000; // Send temperature every 5 seconds
+
+// === Rain Detection Variables ===
+enum RainMode
+{
+  RAIN_AUTO,
+  RAIN_MANUAL
+};
+enum RainLevel
+{
+  NO_RAIN,
+  LIGHT_RAIN,
+  MODERATE_RAIN,
+  HEAVY_RAIN
+};
+enum WindowState
+{
+  WINDOW_OPEN = 0,
+  WINDOW_CLOSED = 165
+};
+
+RainMode currentRainMode = RAIN_AUTO;
+WindowState currentWindowState = WINDOW_OPEN;
+RainLevel currentRainLevel = NO_RAIN;
+
+// Rain detection parameters
+const int RAIN_SAMPLES = 10;
+const int RAIN_SAMPLE_INTERVAL = 50;
+const int NO_RAIN_THRESHOLD = 200;
+const int LIGHT_RAIN_THRESHOLD = 400;
+const int MODERATE_RAIN_THRESHOLD = 600;
+const int DRY_CONFIRMATION_COUNT = 20; // 10 seconds of consistent dry readings
+
+int dryReadingCounter = 0;
+unsigned long lastRainSampleTime = 0;
+unsigned long lastRainSend = 0;
+const unsigned long rainSendInterval = 3000; // Send rain data every 3 seconds
 
 // === Modes ===
 enum Mode
@@ -127,6 +176,18 @@ void setup()
   // Fan control setup
   dht.begin();
   pinMode(motorPin, OUTPUT);
+
+  // Rain detection setup
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+
+  windowServo1.setPeriodHertz(50);
+  windowServo1.attach(windowServoPin1, 1000, 2000);
+  windowServo2.setPeriodHertz(50);
+  windowServo2.attach(windowServoPin2, 1000, 2000);
+
+  delay(1000);
+  setWindowState(WINDOW_OPEN);
 
   Serial.println("🌒 ESP32 Smart LED Controller with API Integration");
 
@@ -272,12 +333,32 @@ void loop()
     lastTempSend = currentTime;
   }
 
+  // === Rain Detection Logic ===
+  if (currentRainMode == RAIN_AUTO)
+  {
+    if (currentTime - lastRainSampleTime >= RAIN_SAMPLE_INTERVAL)
+    {
+      processRainDetection();
+      lastRainSampleTime = currentTime;
+    }
+  }
+
+  // Send rain data
+  if (currentTime - lastRainSend >= rainSendInterval)
+  {
+    sendRainData();
+    lastRainSend = currentTime;
+  }
+
   // === Debug Output Every 5000ms ===
   if (currentTime - lastDebugTime >= debugInterval)
   {
-    Serial.printf("LDR: %d | Garage: %d | Temp: %.1f°C | Fan: %d (%s) | WiFi: %s\n",
+    Serial.printf("LDR: %d | Garage: %d | Temp: %.1f°C | Fan: %d (%s) | Rain: %s | Windows: %s (%s) | WiFi: %s\n",
                   ldrValue, garageLdrValue, lastTemperature, manualPWM,
                   fanAutoControl ? "AUTO" : "MANUAL",
+                  getRainLevelString(currentRainLevel),
+                  currentWindowState == WINDOW_OPEN ? "OPEN" : "CLOSED",
+                  currentRainMode == RAIN_AUTO ? "AUTO" : "MANUAL",
                   WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
     lastDebugTime = currentTime;
   }
@@ -376,6 +457,12 @@ const char *getDeviceType(const char *deviceId)
     return "fan_motor";
   if (strcmp(deviceId, temperatureSensorDeviceId) == 0)
     return "temperature_sensor";
+  if (strcmp(deviceId, rainSensorDeviceId) == 0)
+    return "rain_sensor";
+  if (strcmp(deviceId, windowServo1DeviceId) == 0)
+    return "window_servo";
+  if (strcmp(deviceId, windowServo2DeviceId) == 0)
+    return "window_servo";
   return nullptr;
 }
 
@@ -397,6 +484,10 @@ bool executeCommand(const char *deviceType, String commandType, JsonObject comma
   else if (strcmp(deviceType, "fan_motor") == 0)
   {
     return executeFanCommand(commandType, commandData);
+  }
+  else if (strcmp(deviceType, "rain_sensor") == 0 || strcmp(deviceType, "window_servo") == 0)
+  {
+    return executeRainCommand(commandType, commandData);
   }
   return false;
 }
@@ -816,6 +907,24 @@ void handleSerial()
     fanAutoControl = true;
     Serial.println("Switched to AUTO mode");
   }
+  else if (input.equalsIgnoreCase("auto"))
+  {
+    currentRainMode = RAIN_AUTO;
+    dryReadingCounter = 0;
+    Serial.println("Rain detection: AUTO mode activated");
+  }
+  else if (input.equalsIgnoreCase("open"))
+  {
+    currentRainMode = RAIN_MANUAL;
+    setWindowState(WINDOW_OPEN);
+    Serial.println("Manual: Windows opened");
+  }
+  else if (input.equalsIgnoreCase("close"))
+  {
+    currentRainMode = RAIN_MANUAL;
+    setWindowState(WINDOW_CLOSED);
+    Serial.println("Manual: Windows closed");
+  }
   else
   {
     int c1 = input.indexOf(',');
@@ -843,6 +952,7 @@ void handleSerial()
       Serial.println("Invalid input. Try: 255,150,0 or #FF9900 or 'sunset'");
       Serial.println("New commands: 'wifi' (status), 'reconnect' (WiFi)");
       Serial.println("Fan commands: 0-3 (speed), A (auto mode)");
+      Serial.println("Rain commands: 'auto', 'open', 'close'");
     }
   }
 }
@@ -1001,6 +1111,237 @@ void sendFanStatus()
   {
     Serial.printf("Fan status sent: Speed=%d, Temp=%.1f°C, Auto=%s\n",
                   manualPWM, lastTemperature, fanAutoControl ? "true" : "false");
+  }
+
+  http.end();
+}
+
+// Rain detection command execution
+bool executeRainCommand(String commandType, JsonObject commandData)
+{
+  if (commandType == "rain_control")
+  {
+    String action = commandData["action"];
+
+    if (action == "set_mode")
+    {
+      String mode = commandData["mode"];
+      if (mode == "AUTO")
+      {
+        currentRainMode = RAIN_AUTO;
+        dryReadingCounter = 0;
+        Serial.println("Rain detection set to AUTO mode via API");
+      }
+      else if (mode == "MANUAL")
+      {
+        currentRainMode = RAIN_MANUAL;
+        Serial.println("Rain detection set to MANUAL mode via API");
+      }
+      return true;
+    }
+    else if (action == "set_window_state")
+    {
+      String windowState = commandData["window_state"];
+      currentRainMode = RAIN_MANUAL;
+      if (windowState == "OPEN")
+      {
+        setWindowState(WINDOW_OPEN);
+        Serial.println("Windows opened via API");
+      }
+      else if (windowState == "CLOSED")
+      {
+        setWindowState(WINDOW_CLOSED);
+        Serial.println("Windows closed via API");
+      }
+      return true;
+    }
+    else if (action == "emergency_close")
+    {
+      setWindowState(WINDOW_CLOSED);
+      Serial.println("EMERGENCY: Windows closed via API");
+      return true;
+    }
+    else if (action == "emergency_open")
+    {
+      setWindowState(WINDOW_OPEN);
+      Serial.println("EMERGENCY: Windows opened via API");
+      return true;
+    }
+  }
+  return false;
+}
+
+// Process rain detection
+void processRainDetection()
+{
+  int totalReading = 0;
+  for (int i = 0; i < RAIN_SAMPLES; i++)
+  {
+    totalReading += analogRead(rainSensorPin);
+    delayMicroseconds(100);
+  }
+  int avgReading = totalReading / RAIN_SAMPLES;
+
+  RainLevel detectedLevel = classifyRainLevel(avgReading);
+
+  if (detectedLevel != currentRainLevel)
+  {
+    currentRainLevel = detectedLevel;
+    displayRainStatus(avgReading);
+  }
+
+  // Window control logic
+  if (currentRainLevel > NO_RAIN)
+  {
+    if (currentWindowState == WINDOW_OPEN)
+    {
+      setWindowState(WINDOW_CLOSED);
+      Serial.println("CAUTION: Windows closed due to rain detection");
+    }
+    dryReadingCounter = 0;
+  }
+  else
+  {
+    dryReadingCounter++;
+    if (currentWindowState == WINDOW_CLOSED)
+    {
+      int remainingTime = DRY_CONFIRMATION_COUNT - dryReadingCounter;
+      if (remainingTime > 0)
+      {
+        Serial.print("Dry conditions detected - Opening in ");
+        Serial.print(remainingTime * RAIN_SAMPLE_INTERVAL / 1000.0, 1);
+        Serial.println("s");
+      }
+      else
+      {
+        setWindowState(WINDOW_OPEN);
+        Serial.println("Consistent dry conditions confirmed - Windows opened");
+        dryReadingCounter = 0;
+      }
+    }
+  }
+}
+
+// Classify rain level
+RainLevel classifyRainLevel(int reading)
+{
+  if (reading < NO_RAIN_THRESHOLD)
+    return NO_RAIN;
+  if (reading < LIGHT_RAIN_THRESHOLD)
+    return LIGHT_RAIN;
+  if (reading < MODERATE_RAIN_THRESHOLD)
+    return MODERATE_RAIN;
+  return HEAVY_RAIN;
+}
+
+// Display rain status
+void displayRainStatus(int reading)
+{
+  Serial.print("Rain Level: ");
+  Serial.print(reading);
+  Serial.print(" | ");
+
+  switch (currentRainLevel)
+  {
+  case NO_RAIN:
+    Serial.println("No rain detected");
+    break;
+  case LIGHT_RAIN:
+    Serial.println("Light rain detected - CAUTION advised");
+    break;
+  case MODERATE_RAIN:
+    Serial.println("Moderate rain detected - CAUTION: Secure windows");
+    break;
+  case HEAVY_RAIN:
+    Serial.println("Heavy rain detected - CAUTION: Keep windows sealed");
+    break;
+  }
+}
+
+// Set window state
+void setWindowState(WindowState state)
+{
+  if (state != currentWindowState)
+  {
+    windowServo1.write(state);
+    windowServo2.write(state);
+    currentWindowState = state;
+    delay(1000);
+  }
+}
+
+// Get rain level as string
+const char *getRainLevelString(RainLevel level)
+{
+  switch (level)
+  {
+  case NO_RAIN:
+    return "DRY";
+  case LIGHT_RAIN:
+    return "LIGHT";
+  case MODERATE_RAIN:
+    return "MODERATE";
+  case HEAVY_RAIN:
+    return "HEAVY";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+// Send rain data to API
+void sendRainData()
+{
+  if (WiFi.status() != WL_CONNECTED)
+    return;
+
+  // Read current rain sensor value
+  int totalReading = 0;
+  for (int i = 0; i < RAIN_SAMPLES; i++)
+  {
+    totalReading += analogRead(rainSensorPin);
+    delayMicroseconds(100);
+  }
+  int avgReading = totalReading / RAIN_SAMPLES;
+
+  // Send rain sensor reading
+  sendSensorReading(rainSensorDeviceId, "rain", avgReading, "analog_value");
+
+  // Send rain status update
+  sendRainStatus(avgReading);
+}
+
+// Send rain status to API
+void sendRainStatus(int rainReading)
+{
+  if (WiFi.status() != WL_CONNECTED)
+    return;
+
+  HTTPClient http;
+  String url = String(apiBaseUrl) + "/rain-control";
+
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(1000);
+
+  DynamicJsonDocument doc(256);
+  doc["device_id"] = rainSensorDeviceId;
+  doc["rain_level"] = getRainLevelString(currentRainLevel);
+  doc["rain_reading"] = rainReading;
+  doc["window_state"] = currentWindowState == WINDOW_OPEN ? "OPEN" : "CLOSED";
+  doc["mode"] = currentRainMode == RAIN_AUTO ? "AUTO" : "MANUAL";
+  doc["dry_count"] = dryReadingCounter;
+
+  String jsonString;
+  serializeJson(doc, jsonString);
+
+  int httpResponseCode = http.PATCH(jsonString);
+
+  if (httpResponseCode == 200)
+  {
+    Serial.printf("Rain status sent: %s | Windows: %s | Mode: %s\n",
+                  getRainLevelString(currentRainLevel),
+                  currentWindowState == WINDOW_OPEN ? "OPEN" : "CLOSED",
+                  currentRainMode == RAIN_AUTO ? "AUTO" : "MANUAL");
   }
 
   http.end();

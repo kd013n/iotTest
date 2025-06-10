@@ -243,6 +243,12 @@ export default function LightingControl() {
             >
               🌀 Fan Control
             </a>
+            <a
+              href="/rain-control"
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition"
+            >
+              🌧️ Rain Control
+            </a>
           </nav>
         </div>
       </header>

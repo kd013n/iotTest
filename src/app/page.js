@@ -38,6 +38,12 @@ export default function LandingPage() {
           >
             🌀 Fan Control
           </a>
+          <a
+            href="/rain-control"
+            className="px-6 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-lg font-semibold shadow-lg transition"
+          >
+            🌧️ Rain Control
+          </a>
         </div>
       </main>
 
