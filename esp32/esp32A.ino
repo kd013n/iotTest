@@ -64,7 +64,7 @@ const int motorPin = 5; // GPIO5 connected to IRLZ44N Gate
 
 // === Rain Detection Hardware ===
 const int rainSensorPin = 4;
-const int windowServoPin1 = 13;
+const int windowServoPin1 = 17;
 const int windowServoPin2 = 16; // Changed from 14 to avoid conflict
 
 Servo windowServo1, windowServo2;

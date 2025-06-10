@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Layout from '@/components/Layout'
 
-export default function Dashboard() {
+export default function UnifiedDashboard() {
   const [activeRoom, setActiveRoom] = useState('Living Room')
   const [devices, setDevices] = useState([])
   const [sensors, setSensors] = useState([])
@@ -69,81 +68,97 @@ export default function Dashboard() {
     }
   }
 
+  const getSensorValue = (deviceId, sensorType) => {
+    const sensor = sensors.find(s => s.device_id === deviceId && s.sensor_type === sensorType)
+    return sensor ? (sensor.value || sensor.reading_value) : null
+  }
+
   const getTemperature = () => {
-    return fanData?.latestTemperature?.value || 32
+    return fanData?.latestTemperature?.value || 0
   }
 
   const getHumidity = () => {
-    return 40 // Mock for now
+    // Mock humidity for now - you can add actual humidity sensor later
+    return 40
   }
 
   const getRainLevel = () => {
     return rainData?.latestRainReading?.value || 0
   }
 
-  const getSmokeLevel = () => {
+  const getGasLevel = () => {
     return smokeData?.latestSmokeReading?.value || 0
   }
 
   if (loading) {
     return (
-      <Layout>
-        <div className="flex items-center justify-center h-64">
-          <div className="text-xl text-gray-600 dark:text-gray-300">Loading dashboard...</div>
-        </div>
-      </Layout>
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-2xl">Loading...</div>
+      </div>
     )
   }
 
   return (
-    <Layout>
-      <div className="space-y-6">
-        {/* Header */}
+    <div className="min-h-screen bg-gray-100">
+      {/* Header */}
+      <header className="bg-gray-900 text-white p-4">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">My Home 🏠</h1>
-            <p className="text-gray-600 dark:text-gray-400">Welcome back to homnii</p>
+          <div className="flex items-center space-x-4">
+            <div className="text-xl font-bold">🏠 hommii</div>
+          </div>
+          <div className="text-sm">0</div>
+        </div>
+      </header>
+
+      {/* Room Navigation */}
+      <div className="bg-white border-b">
+        <div className="flex items-center p-4">
+          <span className="text-gray-600 mr-4">My Home 🏠</span>
+          <div className="flex space-x-6">
+            {rooms.map(room => (
+              <button
+                key={room}
+                onClick={() => setActiveRoom(room)}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  activeRoom === room 
+                    ? 'bg-blue-100 text-blue-600 font-medium' 
+                    : 'text-gray-600 hover:text-gray-800'
+                }`}
+              >
+                {room}
+              </button>
+            ))}
           </div>
         </div>
+      </div>
 
-        {/* Room Navigation */}
-        <div className="flex space-x-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-          {rooms.map(room => (
-            <button
-              key={room}
-              onClick={() => setActiveRoom(room)}
-              className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                activeRoom === room 
-                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' 
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              {room}
-            </button>
-          ))}
-        </div>
-
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      {/* Main Content */}
+      <div className="p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* Left Column - Room Controls */}
-          <div className="lg:col-span-3 space-y-6">
+          <div className="lg:col-span-2 space-y-6">
             {activeRoom === 'Living Room' && <LivingRoomControls 
               devices={devices} 
+              sensors={sensors} 
               fanData={fanData}
-              rainData={rainData}
               sendCommand={sendCommand}
+              getSensorValue={getSensorValue}
             />}
             {activeRoom === 'Kitchen' && <KitchenControls 
               devices={devices} 
+              sensors={sensors}
               sendCommand={sendCommand}
+              getSensorValue={getSensorValue}
             />}
             {activeRoom === 'Garage' && <GarageControls 
               devices={devices} 
+              sensors={sensors}
               garageData={garageData}
               doorData={doorData}
               smokeData={smokeData}
               sendCommand={sendCommand}
+              getSensorValue={getSensorValue}
             />}
           </div>
 
@@ -153,33 +168,34 @@ export default function Dashboard() {
               temperature={getTemperature()}
               humidity={getHumidity()}
               rainLevel={getRainLevel()}
-              smokeLevel={getSmokeLevel()}
+              gasLevel={getGasLevel()}
             />
             <ActivityCard />
           </div>
         </div>
       </div>
-    </Layout>
+    </div>
   )
 }
 
 // Living Room Controls Component
-function LivingRoomControls({ devices, fanData, rainData, sendCommand }) {
+function LivingRoomControls({ devices, sensors, fanData, sendCommand, getSensorValue }) {
   const rgbDevice = devices.find(d => d.type === 'rgb_led_channel' && d.name.includes('Red'))
   const fanDevice = fanData?.devices?.find(d => d.type === 'fan_motor')
+  const tempSensor = fanData?.devices?.find(d => d.type === 'temperature_sensor')
   
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="space-y-6">
       {/* Ambient Light Control */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="bg-white rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">💡 Ambient Light</h3>
+          <h3 className="text-lg font-medium">💡 Ambient Light</h3>
           <div className="flex items-center space-x-2">
             <span className="w-3 h-3 bg-orange-400 rounded-full"></span>
-            <span className="text-sm text-gray-600 dark:text-gray-400">On</span>
+            <span className="text-sm text-gray-600">On</span>
           </div>
         </div>
-        <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">Natural Device Color</div>
+        <div className="text-sm text-gray-500 mb-4">Natural Device Color</div>
         
         <div className="grid grid-cols-3 gap-3">
           <button 
@@ -187,7 +203,7 @@ function LivingRoomControls({ devices, fanData, rainData, sendCommand }) {
               command_type: 'rgb_control',
               command_data: { mode: 'fade', preset: 'sunset' }
             })}
-            className="bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-200 dark:hover:bg-orange-800 transition-colors"
+            className="bg-orange-100 text-orange-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Sunset
           </button>
@@ -196,7 +212,7 @@ function LivingRoomControls({ devices, fanData, rainData, sendCommand }) {
               command_type: 'rgb_control', 
               command_data: { mode: 'fade', preset: 'forest' }
             })}
-            className="bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-200 dark:hover:bg-green-800 transition-colors"
+            className="bg-green-100 text-green-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Forest
           </button>
@@ -205,7 +221,7 @@ function LivingRoomControls({ devices, fanData, rainData, sendCommand }) {
               command_type: 'rgb_control',
               command_data: { mode: 'fade', preset: 'midnight' }
             })}
-            className="bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+            className="bg-blue-100 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Midnight
           </button>
@@ -213,12 +229,12 @@ function LivingRoomControls({ devices, fanData, rainData, sendCommand }) {
       </div>
 
       {/* Fan Control */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="bg-white rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">🌀 Ceiling Fan</h3>
+          <h3 className="text-lg font-medium">🌀 Ceiling Fan</h3>
           <div className="flex items-center space-x-2">
             <span className="w-3 h-3 bg-blue-400 rounded-full"></span>
-            <span className="text-sm text-gray-600 dark:text-gray-400">Auto</span>
+            <span className="text-sm text-gray-600">Auto</span>
           </div>
         </div>
         
@@ -230,7 +246,7 @@ function LivingRoomControls({ devices, fanData, rainData, sendCommand }) {
                 action: 'set_speed',
                 speed: index === 0 ? 0 : index === 1 ? 150 : index === 2 ? 210 : 255
               })}
-              className="bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white px-3 py-2 rounded-lg text-sm transition-colors"
+              className="bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg text-sm"
             >
               {speed}
             </button>
@@ -238,61 +254,58 @@ function LivingRoomControls({ devices, fanData, rainData, sendCommand }) {
         </div>
       </div>
 
-      {/* Rain Sensor */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      {/* Ground Detector */}
+      <div className="bg-white rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">🌧️ Rain Sensor</h3>
-          <span className="text-sm bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400 px-2 py-1 rounded">Normal</span>
+          <h3 className="text-lg font-medium">🌧️ Rain Sensor</h3>
+          <span className="text-sm bg-green-100 text-green-600 px-2 py-1 rounded">Normal</span>
         </div>
-        <div className="text-sm text-gray-500 dark:text-gray-400">Window Control: Auto</div>
-        <div className="text-sm text-gray-600 dark:text-gray-300 mt-2">
-          Level: {rainData?.latestRainReading?.value || 0}
-        </div>
+        <div className="text-sm text-gray-500">Window Control: Auto</div>
       </div>
     </div>
   )
 }
 
-// Kitchen Controls Component
-function KitchenControls({ devices, sendCommand }) {
+// Kitchen Controls Component  
+function KitchenControls({ devices, sendCommand, getSensorValue }) {
   const kitchenLed = devices.find(d => d.type === 'led' && d.name.includes('Kitchen'))
-
+  
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">💡 Kitchen Light</h3>
+          <h3 className="text-lg font-medium">💡 Kitchen Light</h3>
           <div className="flex items-center space-x-2">
             <span className="w-3 h-3 bg-green-400 rounded-full"></span>
-            <span className="text-sm text-gray-600 dark:text-gray-400">Auto</span>
+            <span className="text-sm text-gray-600">Auto</span>
           </div>
         </div>
-
+        
         <div className="grid grid-cols-3 gap-3">
-          <button
+          <button 
             onClick={() => kitchenLed && sendCommand('commands', kitchenLed.id, {
               command_type: 'led_control',
               command_data: { action: 'on', manual_override: true }
             })}
-            className="bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-200 dark:hover:bg-green-800 transition-colors"
+            className="bg-green-100 text-green-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             On
           </button>
-          <button
+          <button 
             onClick={() => kitchenLed && sendCommand('commands', kitchenLed.id, {
               command_type: 'led_control',
               command_data: { action: 'off', manual_override: true }
             })}
-            className="bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-200 dark:hover:bg-red-800 transition-colors"
+            className="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Off
           </button>
-          <button
+          <button 
             onClick={() => kitchenLed && sendCommand('commands', kitchenLed.id, {
               command_type: 'led_control',
               command_data: { action: 'auto', manual_override: false }
             })}
-            className="bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+            className="bg-blue-100 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Auto
           </button>
@@ -307,16 +320,17 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
   const garageLed = devices.find(d => d.type === 'led' && d.name.includes('Garage'))
   const garageServo = garageData?.devices?.find(d => d.type === 'servo_motor')
   const doorServo = doorData?.devices?.find(d => d.type === 'servo_motor')
+  const smokeDevice = smokeData?.devices?.find(d => d.type === 'gas_sensor')
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="space-y-6">
       {/* Garage Light */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="bg-white rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">💡 Garage Light</h3>
+          <h3 className="text-lg font-medium">💡 Garage Light</h3>
           <div className="flex items-center space-x-2">
             <span className="w-3 h-3 bg-blue-400 rounded-full"></span>
-            <span className="text-sm text-gray-600 dark:text-gray-400">Auto</span>
+            <span className="text-sm text-gray-600">Auto</span>
           </div>
         </div>
 
@@ -326,7 +340,7 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
               command_type: 'led_control',
               command_data: { action: 'on', manual_override: true }
             })}
-            className="bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-200 dark:hover:bg-green-800 transition-colors"
+            className="bg-green-100 text-green-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             On
           </button>
@@ -335,7 +349,7 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
               command_type: 'led_control',
               command_data: { action: 'off', manual_override: true }
             })}
-            className="bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-200 dark:hover:bg-red-800 transition-colors"
+            className="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Off
           </button>
@@ -344,7 +358,7 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
               command_type: 'led_control',
               command_data: { action: 'auto', manual_override: false }
             })}
-            className="bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+            className="bg-blue-100 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Auto
           </button>
@@ -352,10 +366,10 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
       </div>
 
       {/* Main Door Access */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="bg-white rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">🔐 Main Door</h3>
-          <span className="text-sm bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400 px-2 py-1 rounded">Locked</span>
+          <h3 className="text-lg font-medium">🔐 Main Door</h3>
+          <span className="text-sm bg-red-100 text-red-600 px-2 py-1 rounded">Locked</span>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -364,7 +378,7 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
               action: 'unlock',
               access_code: '2309'
             })}
-            className="bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-200 dark:hover:bg-green-800 transition-colors"
+            className="bg-green-100 text-green-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Unlock
           </button>
@@ -372,7 +386,7 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
             onClick={() => doorServo && sendCommand('door-access', doorServo.id, {
               action: 'lock'
             })}
-            className="bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-200 dark:hover:bg-red-800 transition-colors"
+            className="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Lock
           </button>
@@ -380,10 +394,10 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
       </div>
 
       {/* Garage Door Control */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="bg-white rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">🚪 Garage Door</h3>
-          <span className="text-sm bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded">Closed</span>
+          <h3 className="text-lg font-medium">🚪 Garage Door</h3>
+          <span className="text-sm bg-gray-100 text-gray-600 px-2 py-1 rounded">Closed</span>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -391,7 +405,7 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
             onClick={() => garageServo && sendCommand('garage-control', garageServo.id, {
               action: 'open'
             })}
-            className="bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+            className="bg-blue-100 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Open
           </button>
@@ -399,7 +413,7 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
             onClick={() => garageServo && sendCommand('garage-control', garageServo.id, {
               action: 'close'
             })}
-            className="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            className="bg-gray-100 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium"
           >
             Close
           </button>
@@ -407,12 +421,12 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
       </div>
 
       {/* Smoke Detector */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="bg-white rounded-xl p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">🚨 Smoke Detector</h3>
-          <span className="text-sm bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400 px-2 py-1 rounded">Normal</span>
+          <h3 className="text-lg font-medium">🚨 Smoke Detector</h3>
+          <span className="text-sm bg-green-100 text-green-600 px-2 py-1 rounded">Normal</span>
         </div>
-        <div className="text-sm text-gray-500 dark:text-gray-400">
+        <div className="text-sm text-gray-500">
           Level: {smokeData?.latestSmokeReading?.value || 0} ppm
         </div>
       </div>
@@ -421,35 +435,35 @@ function GarageControls({ devices, garageData, doorData, smokeData, sendCommand 
 }
 
 // Environmental Card Component
-function EnvironmentalCard({ temperature, humidity, rainLevel, smokeLevel }) {
+function EnvironmentalCard({ temperature, humidity, rainLevel, gasLevel }) {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-      <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">🌡️ Environment</h3>
+    <div className="bg-white rounded-xl p-6 shadow-sm">
+      <h3 className="text-lg font-medium mb-4">🌡️ Environment</h3>
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600 dark:text-gray-400">Temperature</span>
-          <span className="text-lg font-medium text-gray-900 dark:text-white">{temperature}°C</span>
+          <span className="text-sm text-gray-600">Temperature</span>
+          <span className="text-lg font-medium">{temperature}°C</span>
         </div>
 
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600 dark:text-gray-400">Humidity</span>
-          <span className="text-lg font-medium text-gray-900 dark:text-white">{humidity}%</span>
+          <span className="text-sm text-gray-600">Humidity</span>
+          <span className="text-lg font-medium">{humidity}%</span>
         </div>
 
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600 dark:text-gray-400">Rain Level</span>
-          <span className="text-lg font-medium text-gray-900 dark:text-white">{rainLevel}</span>
+          <span className="text-sm text-gray-600">Rain Level</span>
+          <span className="text-lg font-medium">{rainLevel}</span>
         </div>
 
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600 dark:text-gray-400">Air Quality</span>
+          <span className="text-sm text-gray-600">Air Quality</span>
           <span className={`text-sm px-2 py-1 rounded ${
-            smokeLevel < 300 ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400' :
-            smokeLevel < 500 ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-600 dark:text-yellow-400' :
-            'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400'
+            gasLevel < 300 ? 'bg-green-100 text-green-600' :
+            gasLevel < 500 ? 'bg-yellow-100 text-yellow-600' :
+            'bg-red-100 text-red-600'
           }`}>
-            {smokeLevel < 300 ? 'Good' : smokeLevel < 500 ? 'Fair' : 'Poor'}
+            {gasLevel < 300 ? 'Good' : gasLevel < 500 ? 'Fair' : 'Poor'}
           </span>
         </div>
       </div>
@@ -467,18 +481,18 @@ function ActivityCard() {
   ]
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-      <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">📋 Activity</h3>
+    <div className="bg-white rounded-xl p-6 shadow-sm">
+      <h3 className="text-lg font-medium mb-4">📋 Activity</h3>
 
       <div className="space-y-3">
         {activities.map((activity, index) => (
           <div key={index} className="flex items-start space-x-3">
             <div className="w-2 h-2 bg-blue-400 rounded-full mt-2"></div>
             <div className="flex-1">
-              <div className="text-sm font-medium text-gray-900 dark:text-white">{activity.action}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{activity.time}</div>
+              <div className="text-sm font-medium">{activity.action}</div>
+              <div className="text-xs text-gray-500">{activity.time}</div>
             </div>
-            <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded">
+            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
               {activity.status}
             </span>
           </div>
